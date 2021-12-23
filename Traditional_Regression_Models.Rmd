@@ -1,0 +1,131 @@
+---
+title: "Traditional_Regression_Activity_Akhavi"
+author: "Arash Akhavi"
+date: "11/2/2021"
+output: 
+  prettydoc::html_pretty:
+  theme: architect
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+Problem 1.\
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+#Import Data
+ladybugs <- read_csv("Data/LadyBugs.csv")
+
+#Plot Data
+ladybugs %>% 
+  ggplot(aes(x = Temp, y = Lighted)) + 
+           ggtitle("Lighted vs. Temperature") +
+           geom_point(alpha = 0.5) +
+           xlab("Temp") + 
+           ylab("Lighted") + 
+           theme(plot.title = element_text(hjust = 0.5))
+```
+\
+The plot above shows a cubic function. As Temperature increases so does Lighted until around 10 degrees, then it decreases until about 30 degrees before increasing once more. No a straight line model will not fit this data well.\
+
+```{r}
+#Fit three polynomial regression models to the data
+m1 <- lm(Lighted ~ poly(Temp, 2), data = ladybugs)
+summary(m1)
+m2 <- lm(Lighted ~ poly(Temp, 3), data = ladybugs)
+summary(m2)
+m3 <- lm(Lighted ~ poly(Temp, 4), data = ladybugs)
+summary(m3)
+
+#Plot the three models to the data
+ladybugs %>% 
+  ggplot(aes(x = Temp, y = Lighted)) + 
+           ggtitle("Lighted vs. Temperature") +
+           geom_point() +
+           stat_smooth(color = "red", method = "lm", formula = y ~ poly(x, 2), se = FALSE) +
+           stat_smooth(color = "green", method = "lm", formula = y ~ poly(x, 3), se = FALSE) +
+           stat_smooth(color = "blue", method = "lm", formula = y ~ poly(x, 4), se = FALSE) +
+           xlab("Temp") + 
+           ylab("Lighted") + 
+           theme(plot.title = element_text(hjust = 0.5))
+```
+\
+From the plot above the blue model fits the cubic function the closest out of the other models. This would be model 3 (m3) which had a polynomial value of 4. Green represents model 2 (m2) which had a polynomial value of 3 and did fit the graph well but not as great as m3. In this instance the higher polynomial value fit this model better but that will not always be the case.\
+Model 1 (m1) had an R-squared of  0.6009 and an	Adjusted R-squared of  0.5814. Model 2 (m2) had an R-squared of  0.7526 and an Adjusted R-squared of  0.7341. Model 3 (m3) had an R-squared of 0.7811 and an Adjusted R-squared of 0.7587. Model 3 (m3) had the highest R-squared and Adjusted R-squared of the three models tested. This is consistent with our intuition of this model being the best fit as now we have confirmed it has the largest Adjusted R-squared value. 
+
+```{r}
+#Final Plot with the Best Fit Model (m3)
+ladybugs %>% 
+  ggplot(aes(x = Temp, y = Lighted)) + 
+           ggtitle("Lighted vs. Temperature") +
+           geom_point() +
+           stat_smooth(color = "blue", method = "lm", formula = y ~ poly(x, 4)) +
+           xlab("Temp") + 
+           ylab("Lighted") + 
+           theme(plot.title = element_text(hjust = 0.5))
+```
+\
+As we increase the degree of the polynomial model the the training error will decrease since the training set has typically 2/3's of the values in the data set and the test set has the remaining 1/3. The model will continue to become a better fit as the n-value increases for the polynomial. Both error values (Training and Test) should decrease as the model becomes a better fit for the data set, however the test error will max out at a certain amount due to the higher n value polynomial better fitting the larger portion of the data.\
+Problem 2.\
+```{r}
+library(ISLR)
+Model1 <- lm(Sales ~ Price + Urban + US, data = Carseats); summary(Model1)
+```
+
+Coefficient estimates for Model1\
+(Intercept) 13.043469\
+Price       -0.054459\
+UrbanYes    -0.021916\
+USYes        1.200573\
+
+Sales is the unit sales in thousands at each location.\
+The coefficient Price represents the price the company charges for car seats at each site. This shows that at higher prices less car seats are being sold.\
+The coefficient Urban represents whether the store is in an urban or rural location (Yes/No). There are -0.02 * 1000 sales for Urban stores.\
+The coefficient US represents whether the store is located in the US or not (Yes/No). There are 1.20 *1000 sales for stores located in the US.\
+
+
+
+Population regression line:
+\begin{equation}
+Sales = \beta_0 + \beta_1 Price + \beta_2 Urban + \beta_3 US + \epsilon_i
+\end{equation}
+\
+Price and US are both useful predictors in predicting sales based on their low p-values of 2e-16 and 4.86e-06, respectively.\
+For both Price and US you can reject the null hypothesis as the p-values are close to 0.\
+\
+All the conditions for inference were satisfied. P-value and F-test were used. The low p-value and high F-test meant the data was in fact statistically significant.\
+
+```{r}
+#Fit a smaller model with only predictors that have evidence associated with the outcome
+Model2 <- lm(Sales ~ Price + US, data = Carseats); summary(Model2)
+```
+\
+Coefficient estimates for (7)\
+(Intercept) 13.03079\
+Price       -0.05448\
+USYes        1.19964\
+\
+The Adjusted R-squared for the smaller model (Model 2) is 0.235 which is slightly better than the adjusted R-squared for the original model (Model 1) which was 0.234.\
+
+```{r}
+#Calculate Standard Error
+e_1 <- residuals(Model1)
+n <- nrow(Carseats)
+k1 <- 4
+SSE_1 <- sum(e_1^2)
+se_1 <- sqrt(SSE_1/(n-k1))
+
+e_2 <- residuals(Model2)
+k2 <- 3
+SSE_2 <- sum(e_2^2)
+se_2 <- sqrt(SSE_2/(n-k2))
+
+se_1; se_2
+```
+Based off the calculation above Model 2 has a much higher standard error than Model 1. Model 2 has a standard error of 51.94 while Model 1 has a standard error of 2.47. On the other hand the summary data reveals that Model 1 has a RSE of 2.472 and Model 2 has a RSE of 2.369. So when comparing the RSE, Model 2 has a slightly lower RSE than Model 1 which is consistent with our other findings thus far. However, when comparing the standard error of each model calculated above it is evident that Model 2 has a standard error of over twenty times larger than that of Model 1. This must indicate there are some outliers in the second model that are causing such a drastically skewed standard error value.\
+
+With respect to R-squared and Adjusted R-squared the smaller model was a better fit. This makes sense as the explanatory variables are all useful predictors of Sales while the larger model had explanatory variables that were not all useful predictors in Sales. Thereby, by reducing the variables and using a smaller model with useful predictors the R-squared and Adjusted R-squared increased making the smaller model a better fit. 
+

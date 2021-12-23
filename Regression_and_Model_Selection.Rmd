@@ -1,0 +1,259 @@
+---
+title: 'Lab 7: Logistic Regression and KNN'
+author: "Arash Akhavi"
+date: "11/9/2021"
+output: 
+  prettydoc::html_pretty:
+  theme: architect
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(ROCR)
+library(ggplot2)
+```
+#Part One: Fitting Data\
+\
+
+```{r}
+#Import data
+ha <- read_csv("https://www.dropbox.com/s/aohbr6yb9ifmc8w/heart_attack.csv?dl=1")
+head(ha)
+#Clean data
+ha <-
+  ha %>% 
+  mutate(
+    sex = as.factor(sex),
+    cp = as.factor(cp),
+    restecg = as.factor(restecg),
+    output = as.factor(output)
+  )
+#Split data
+ha_split <- ha %>% initial_split()
+ha_test <- ha_split %>% testing()
+ha_train <- ha_split %>% training()
+```
+
+**Q1 KNN** 
+\
+```{r}
+#KNN Model
+knn_mod <- nearest_neighbor(neighbors = 5) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+#Create Recipes
+ha_rec1 <- recipe(output ~ age + sex + cp + trtbps + restecg + chol + thalach, data = ha_train) %>%
+  step_normalize(all_numeric())
+ha_rec2 <- recipe(output ~ age + sex + cp + trtbps + restecg + thalach, data = ha_train) %>%
+  step_normalize(all_numeric())
+ha_rec3 <- recipe(output ~ age + sex + cp + trtbps + restecg, data = ha_train) %>%
+  step_normalize(all_numeric())
+#Create Workflow
+ha_wflow_knn <- workflow() %>%
+  add_recipe(ha_rec3) %>%
+  add_model(knn_mod)
+ha_fit <- ha_wflow_knn %>%
+  fit(ha_train)
+ha_fit %>% pull_workflow_fit()
+summary(ha_fit)
+#Confusion Matrix
+preds1 <- ha_fit %>% predict(ha_test)
+
+ha_test_k <- ha_test %>%
+  mutate(
+    pred_output = preds1$.pred_class
+  ) 
+ha_test_k %>% count(output, pred_output)
+
+knn <- ha_test_k %>% 
+  accuracy(output, pred_output)
+knn
+
+ha_cvs <- vfold_cv(ha_test, v = 5)
+ha_wflow_knn %>% 
+  fit_resamples(resamples = ha_cvs) %>% 
+  collect_metrics()
+```
+
+
+
+**Q2 Logistic Regression**
+\
+```{r}
+#Logistic Model
+logistic_model <- logistic_reg() %>%
+  set_mode("classification") %>%
+  set_engine("glm")
+#Create Workflow
+ha_wflow_logit <- workflow() %>%
+  add_recipe(ha_rec3) %>%
+  add_model(logistic_model)
+ha_fit1 <- ha_wflow_logit %>%
+  fit(ha_train)
+ha_fit1 %>% pull_workflow_fit()
+summary(ha_fit1)
+#Confusion Matrix
+preds1 <- ha_fit1 %>% predict(ha_test)
+
+ha_test_log <- ha_test %>%
+  mutate(
+    pred_output = preds1$.pred_class
+  ) 
+ha_test_log %>% count(output, pred_output)
+
+lg <- ha_test_log %>% 
+  accuracy(output, pred_output)
+lg
+
+ha_cvs1 <- vfold_cv(ha_test, v = 5)
+ha_wflow_logit %>% 
+  fit_resamples(resamples = ha_cvs1) %>% 
+  collect_metrics()
+```
+\
+**Q3 Interpretation**
+\
+**Which predictors were most important to predicting heart attack risk?**
+\
+In the KNN model. The first recipe contained all explanatory variables gave an accuracy of 0.666. The next recipe had the variable 
+cholesterol removed and  gave an accuracy of 0.710. The next recipe had variables cholesterol and maximum heart rate removed and gave an accuracy of 0.696. These models had the highest accuracies of the models tested, with recipe two having the highest accuracy of 0.710.\
+\
+In the Logistic Model. The first recipe contained all explanatory variables gave an accuracy of 0.754. The next recipe had the variable 
+cholesterol removed and  gave an accuracy of 0.7681. The next recipe had variables cholesterol and maximum heart rate removed and gave an accuracy of 0.7971. These models had the highest accuracies of the models tested, with recipe three having the highest accuracy of almost 0.8.\
+Overall the logistic model had a higher accuracy than the KNN model.
+
+**Q4 ROC Curve**
+\
+```{r}
+#KNN ROC Curve
+knn_roc <- 
+  cbind(ha_test_k, predict(ha_fit, ha_test_k, type = "prob"))
+knn_roc %>% 
+  roc_curve(truth = output, .pred_0) %>% 
+  autoplot()
+#Log ROC Curve
+log_roc <- 
+  cbind(ha_test_log, predict(ha_fit1, ha_test_log, type = "prob"))
+log_roc %>% 
+  roc_curve(truth = output, .pred_0) %>% 
+  autoplot()
+```
+\
+#Part Two: Metrics
+\
+```{r}
+#KNN Model Metrics
+#Recall
+knn_1 <-
+  ha_wflow_knn %>%
+  fit_resamples(ha_cvs,
+                metrics = metric_set(recall)) %>% 
+  collect_metrics()
+#Precision
+knn_2 <-
+  ha_wflow_knn %>%
+  fit_resamples(ha_cvs,
+                metrics = metric_set(precision)) %>% 
+  collect_metrics()
+#Specificity
+knn_3 <-
+  ha_wflow_knn %>%
+  fit_resamples(ha_cvs,
+                metrics = metric_set(specificity)) %>% 
+  collect_metrics()
+#Logistic Model Metrics
+#Recall
+logit_1 <-
+  ha_wflow_logit %>%
+  fit_resamples(ha_cvs1,
+                metrics = metric_set(recall)) %>% 
+  collect_metrics()
+#Precision
+logit_2 <-
+  ha_wflow_logit %>%
+  fit_resamples(ha_cvs1,
+                metrics = metric_set(precision)) %>% 
+  collect_metrics()
+#Specificity
+logit_3 <-
+  ha_wflow_logit %>%
+  fit_resamples(ha_cvs1,
+                metrics = metric_set(specificity)) %>% 
+  collect_metrics()
+compare_mod <- data.frame(
+  Recall = rbind(knn_1$mean, logit_1$mean),
+  Precision = rbind(knn_2$mean, logit_2$mean),
+  Specificity = rbind(knn_3$mean, logit_3$mean)
+)
+rownames(compare_mod) <- c("KNN Model", "Logistic Model")
+compare_mod
+```
+\
+#Part Three: Discussion
+\
+**Q1 The hospital faces severe lawsuits if they deem a patient to be low risk, and that patient later experiences a heart attack.**
+\
+In this instance we want to reduce the amount of patients the algorithm misses because we don't want a patient that is low risk to later have a heart attack. To do this we use the sensitivity metric as that will give the predictive value of the system compared to the reference result. This gives us the proportion of the positive results out of the number of samples that were actually positive. The recommended model is the logistic model with the recipe output ~ age + sex + cp + trtbps + restecg as it yielded the highest accuracy out of all the models tested as well as a higher specificity than the KNN model. The score from this metric is a mean of 0.6944444. 
+\
+**Q2 The hospital is overfull, and wants to only use bed space for patients most in need of monitoring due to heart attack risk.**
+\
+In this instance we only want to keep the patients who are at risk for heart attack. We want to use the precision metric to make sure that the patients who are at risk for heart attack are truly at risk. The recommended model is the same model as prior as it yielded the highest precision out of the models studied. The score from this metric is a value of 0.7666667 or roughly 77% accuracy. 
+\
+**Q3 The hospital is studying root causes of heart attacks, and would like to understand which biological measures are associated with heart attack risk.**
+\
+In this instance we could use both the precision and sensitivity metric to answer this question. Sensitivity because we want to make sure these patients are actually at risk when studying what causes these attacks, and precision as we want the patients who are actually positive for having a heart attack in the future. The logistic model tested had a higher specificity and precision value than the KNN model therefore that is the model we will use to answer this question. The value for the precision metric is around 77% accuracy and the value for the specificity metric is around 0.70 or 70%.
+\
+**Q4 The hospital is training a new batch of doctors, and they would like to compare the diagnoses of these doctors to the predictions given by the algorithm to measure the ability of new doctors to diagnose patients.**
+\
+Similar to the previous question both metrics would be useful in this scenario. We want to test the observations made by the doctors to see how many of them were actually true so we will put a larger emphasis on the precision metric. Once again the best model, the model with the highest precision value, is the logistic model used earlier. The value for the precision metric is 0.77 or 77% accuracy. 
+\
+#Part Four: Validation
+\
+```{r}
+ha_validation <- read_csv("https://www.dropbox.com/s/jkwqdiyx6o6oad0/heart_attack_validation.csv?dl=1")
+#Clean data
+ha_validation <-
+  ha_validation %>% 
+  mutate(
+    sex = as.factor(sex),
+    cp = as.factor(cp),
+    restecg = as.factor(restecg),
+    output = as.factor(output)
+  )
+```
+```{r}
+#KNN Validation
+ha_val_pred_knn <- data.frame(ha_validation, 
+                          predict(ha_fit, ha_validation),
+                          predict(ha_fit, ha_validation, type="prob"))
+
+knn1 <- roc_auc(ha_val_pred_knn, truth = output, .pred_0)
+knn2 <- precision(ha_val_pred_knn, truth = output, .pred_class)
+knn3 <- recall(ha_val_pred_knn, truth = output, .pred_class)
+
+#Logistic Validation
+ha_val_pred_log <- data.frame(ha_validation, 
+                          predict(ha_fit1, ha_validation),
+                          predict(ha_fit1, ha_validation, type="prob"))
+
+logit1 <- roc_auc(ha_val_pred_log, truth = output, .pred_0)
+logit2 <- precision(ha_val_pred_log, truth = output, .pred_class)
+logit3 <- recall(ha_val_pred_log, truth = output, .pred_class)
+
+compare <- data.frame(
+  Roc_auc = rbind(knn1$.estimate, logit1$.estimate),
+  Recall = rbind(knn3$.estimate, logit3$.estimate),
+  Precision = rbind(knn2$.estimate, logit2$.estimate)
+)
+rownames(compare) <- c("KNN Model", "Logistic Model")
+compare
+compare_mod
+```
+\
+On average the values from the validation data were higher than the values from the cross validation models in part one. Except for the precision values from the Logistic Model. This one yielded a higher value in the cross validation from part one.

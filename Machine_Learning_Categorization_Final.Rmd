@@ -1,0 +1,223 @@
+---
+title: "Final Project Classification"
+author: "Arash Akhavi"
+date: "12/6/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(ROCR)
+library(ggplot2)
+library(vip)
+library(kknn)
+library(glmnet)
+```
+```{r}
+cah_train <- read_csv("Data/CAH-201803-train.csv")
+cah_test <- read_csv("Data/CAH-201803-test.csv")
+head(cah_train)
+cah_train <- cah_train %>% 
+  mutate(
+    #Q1 = as.factor(Q1),
+    political_affiliation = as.factor(political_affiliation)
+    #Q4 = as.factor(Q4),
+    #Q5 = as.factor(Q5),
+    #Q6 = as.factor(Q6),
+    #Q7 = as.factor(Q7),
+    #Q8 = as.factor(Q8),
+    #Q9 = as.factor(Q9),
+    #Q10 = as.factor(Q10),
+    #Q11 = as.factor(Q11),
+    #Q12 = as.factor(Q12),
+    #Q13 = as.factor(Q13),
+   # Q14 = as.factor(Q14),
+   # Q15 = as.factor(Q15),
+   # Q16 = as.factor(Q16),
+   # Q17 = as.factor(Q17),
+   # Q18 = as.factor(Q18)
+  )
+
+cah_split <- cah_train %>% initial_split()
+cah_test1 <- cah_split %>% testing()
+cah_train1 <- cah_split %>% training()
+
+cah_cvs <- vfold_cv(cah_train, v = 10)
+
+cah_rec <- recipe(political_affiliation ~ ., cah_train) %>% 
+  step_rm(id_num)
+```
+
+```{r}
+rf_spec <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+rf_wflow <- workflow() %>%
+  add_recipe(cah_rec) %>%
+  add_model(rf_spec)
+
+rf_grid <- control_grid(save_pred = TRUE, verbose = TRUE)
+
+rf_grid_search <-
+  tune_grid(
+    rf_wflow,
+    resamples = cah_cvs,
+    control = rf_grid
+  )
+
+rf_grid_search %>% 
+  show_best(metric = "roc_auc")
+
+# Best RF Metrics
+# mtry = 4
+# trees = 482
+# min_n = 24
+
+rf_mod <- rand_forest(mtry = 4, trees = 482, min_n = 24) %>%
+  set_engine("ranger", importance = "impurity")%>%
+  set_mode("classification")
+
+rf_wflow <- workflow() %>%
+  add_recipe(cah_rec) %>%
+  add_model(rf_mod)
+
+rf_fit <- rf_wflow %>% 
+  fit(cah_train)
+
+rf_fit %>% 
+  pull_workflow_fit() %>% 
+  vip(num_features = 10,
+      aesthetics = list(color = "black", fill = "indianred")) 
+```
+
+```{r}
+knn_mod <- nearest_neighbor(neighbors = 100) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+cah_rec2 <- recipe(political_affiliation ~ Q4 + Q2 + Q16 + Q17 + Q6 + Q15  + Q13 + Q11, data = cah_train) %>%
+  step_normalize(all_numeric())
+
+cah_wflow_knn <- workflow() %>%
+  add_recipe(cah_rec2) %>%
+  add_model(knn_mod)
+
+cah_fit <- cah_wflow_knn %>%
+  fit(cah_train)
+
+cah_wflow_knn %>% 
+  fit_resamples(resamples = cah_cvs) %>% 
+  collect_metrics()
+```
+#Confusion Matrix
+preds1 <- cah_fit %>% predict(cah_train)
+
+cah_test_k <- cah_train %>%
+  mutate(
+    pred_output = preds1$.pred_class
+  ) 
+cah_test_k %>% count(political_affiliation, pred_output)
+
+knn <- cah_test_k %>% 
+  accuracy(political_affiliation, pred_output)
+knn
+
+cah_fit %>% pull_workflow_fit()
+summary(cah_fit)
+
+
+
+bag_mod <- bag_tree() %>%
+  set_engine("rpart", times = 25) %>%
+  set_mode("classification")
+
+bag_tree_wflow <- workflow() %>%
+  add_recipe(cah_rec) %>%
+  add_model(bag_mod)
+
+bag_tree_wflow %>%
+  fit_resamples(resamples = cah_cvs) %>% 
+  collect_metrics()
+
+```{r}
+
+cah_rec2 <- recipe(political_affiliation ~ Q4 + Q2 + Q16 + Q17 + Q6 + Q15 + Q10 + Q13 + Q11, data = cah_train) %>%
+  step_normalize(all_numeric())
+
+
+tune_spec <- mlp(
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = 100,
+  activation = "softmax"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+nn_wflow <- workflow() %>%
+  add_recipe(cah_rec2) %>%
+  add_model(tune_spec)
+
+nn_grid <- control_grid(verbose = TRUE, save_pred = TRUE)
+
+nn_grid_search <-
+  tune_grid(
+    nn_wflow,
+    resamples = cah_cvs,
+    ctrl = nn_grid
+  )
+
+nn_grid_search %>%
+  show_best(metric = "roc_auc")
+
+# Best NN metrics:
+#   hidden_units: 3
+#   penalty: 	3.125283e-01
+
+nn_mod <- mlp(
+  hidden_units = 3,
+  penalty = 	3.125283e-01,
+  epochs = 250,                 #Change Epcohs from 100 to 200 to 250
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("classification")
+
+nn_wflow <- workflow() %>%
+  add_recipe(cah_rec) %>%
+  add_model(nn_mod)
+
+nn_wflow %>%
+  fit_resamples(resamples = cah_cvs) %>% 
+  collect_metrics()
+
+nn_fit <- nn_wflow %>% 
+  fit(cah_train)
+
+preds1 <- nn_fit %>% predict(cah_test)
+cah_test_fin <- cah_test %>% 
+  mutate(
+    predicted_value = preds1$.pred_class
+  )
+```
+
+
+```{r}
+# Create CSV
+id_column <- 
+  cah_test %>% 
+  select(id_num)
+fin <- data.frame(id_column, 
+                  cah_test_fin$predicted_value)
+write.csv(fin,
+          "/Users/Arash/Downloads/kaggle1.csv", 
+          row.names = FALSE)
+```
+

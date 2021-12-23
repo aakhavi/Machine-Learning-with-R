@@ -1,0 +1,210 @@
+---
+title: "Final Project Regression"
+author: "Arash Akhavi"
+date: "12/6/2021"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(glmnet)
+library(vip)
+```
+
+
+```{r}
+new_train <- read_csv("Data/train_new.csv")
+new_test <- read_csv("Data/test_new.csv")
+set.seed(1667)
+new_train <- new_train %>% 
+  mutate(
+    SalePrice = log(SalePrice)
+  )
+new_train <- new_train %>% 
+  mutate_if(is.character,
+            as.factor)
+new_cvs <- vfold_cv(new_train, v = 10)
+head(new_train)
+```
+
+```{r}
+###### Recipes
+new_rec <- recipe(SalePrice ~ ., data = new_train) %>% 
+    step_scale(all_numeric_predictors()) %>% 
+    step_center(all_numeric_predictors())
+
+new_rec2 <- recipe(SalePrice ~ `Overall Qual` + `Gr Liv Area` + `Year Built` + `Overall Cond` + `Lot Area` + `Full Bath` + Neighborhood + `TotRms AbvGrd` + `House Style` + `Central Air`, data = new_train) %>% 
+    step_scale(all_numeric_predictors()) %>% 
+    step_center(all_numeric_predictors())
+
+new_rec3 <- recipe(SalePrice ~ `Overall Qual` + `Gr Liv Area` + `Year Built` + `Overall Cond` + `Lot Area` + `Full Bath` + Neighborhood + `TotRms AbvGrd` + Functional + `House Style` + `Central Air` + `Half Bath`, data = new_train) %>% 
+    step_scale(all_numeric_predictors()) %>% 
+    step_center(all_numeric_predictors())
+
+new_rec4 <- recipe(SalePrice ~ `Overall Qual` + `Gr Liv Area` + `Year Built` + `Overall Cond`, data = new_train) %>% 
+   step_scale(all_numeric_predictors()) %>% 
+   step_center(all_numeric_predictors())
+
+
+new_rec5 <- recipe(SalePrice ~ ., data = new_train) %>% 
+    step_rm(PID, `Lot Frontage`, Street, Heating, Functional, `Sale Type`, `Pool Area`, `Yr Sold`, `Roof Style`, `Year Built`, Electrical) %>% 
+    step_scale(all_numeric_predictors()) %>% 
+    step_center(all_numeric_predictors())
+```
+
+
+```{r}
+rf_spec <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+rf_wflow <- workflow() %>%
+  add_recipe(new_rec2) %>%
+  add_model(rf_spec)
+
+rf_grid <- control_grid(save_pred = TRUE, verbose = TRUE)
+
+rf_grid_search <-
+  tune_grid(
+    rf_wflow,
+    resamples = new_cvs,
+    control = rf_grid
+  )
+
+rf_grid_search %>% 
+  show_best(metric = "rmse")
+######
+
+rf_mod <- rand_forest(mtry = 7, trees = 1776	, min_n = 11) %>%
+  set_engine("ranger", importance = "impurity")%>%
+  set_mode("regression")
+
+rf_wflow <- workflow() %>%
+  add_recipe(new_rec2) %>%
+  add_model(rf_mod)
+
+rf_wflow %>% 
+  fit_resamples(resamples = new_cvs) %>% 
+  collect_metrics()
+
+rf_fit <- rf_wflow %>% 
+  fit(new_train)
+
+rf_fit %>% 
+  pull_workflow_fit() %>% 
+  vip(num_features = 20,
+      aesthetics = list(color = "black", fill = "indianred")) 
+```
+
+
+```{r}
+#Export
+pred_1 <- nn_fit %>% predict(new_test) %>% 
+  mutate(SalePrice = exp(.pred))
+pid_no <- new_test %>% select(PID)
+fin <- data.frame(pid_no, pred_1$SalePrice)
+fin
+write.csv(fin,
+          "/Users/Arash/Downloads/kaggle2.33.csv",
+          row.names = FALSE)
+```
+
+
+
+```{r}
+tune_spec <- mlp(
+  hidden_units = tune(),
+  penalty = tune(),
+  epochs = 100,
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("regression")
+
+nn_wflow <- workflow() %>%
+  add_recipe(new_rec2) %>%
+  add_model(tune_spec)
+
+nn_grid <- control_grid(verbose = TRUE, save_pred = TRUE)
+
+nn_grid_search <-
+  tune_grid(
+    nn_wflow,
+    resamples = new_cvs,
+    ctrl = nn_grid
+  )
+
+nn_grid_search %>%
+  show_best(metric = "rmse")
+
+nn_mod <- mlp(
+  hidden_units = 9,
+  penalty = 		9.012618e-02,
+  epochs = 200,                 
+  activation = "linear"
+) %>%
+  set_engine("nnet") %>%
+  set_mode("regression")
+
+nn_wflow <- workflow() %>%
+  add_recipe(new_rec3) %>%
+  add_model(nn_mod)
+
+nn_wflow %>%
+  fit_resamples(resamples = new_cvs) %>% 
+  collect_metrics()
+
+nn_fit <- nn_wflow %>% 
+  fit(new_train)
+
+library(NeuralNetTools)
+nn_fit %>% 
+  pull_workflow_fit() %>% 
+  vip(num_features = 20,
+      aesthetics = list(color = "black", fill = "blue2"))
+```
+
+```{r}
+tune_spec <- svm_poly(cost = tune(), degree = tune()) %>%
+  set_mode("regression") %>%
+  set_engine("kernlab")
+
+svm_wflow <- workflow() %>%
+  add_model(tune_spec) %>%
+  add_recipe(new_rec2)
+
+svm_grid <- control_grid(verbose = TRUE)
+
+knn_grid_search <-
+  tune_grid(
+    svm_wflow,
+    resamples = new_cvs,
+    ctrl = svm_grid
+  )
+
+knn_grid_search %>% 
+  show_best(metric = "rmse")
+
+# Build model using best cost and degree value
+# cost = 4.176424827
+# degree = 2
+
+svm_mod <- svm_poly(cost = 4.176424827, degree = 2) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_wflow2 <- workflow() %>%
+  add_model(svm_mod) %>%
+  add_recipe(new_rec2)
+
+svm2_results <- svm_wflow2 %>% 
+  fit_resamples(resamples = new_cvs) %>% 
+  collect_metrics()
+```
+
+
+
